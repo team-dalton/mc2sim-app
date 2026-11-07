@@ -35,7 +35,10 @@ body { display: flex; overflow: hidden; }
 ::selection { background: var(--brand); color: var(--white); }
 header { margin: 0 -16px; padding: 14px 16px 13px; background: linear-gradient(120deg, #a84300 0%, #cc5500 55%, #d9651c 100%); }
 header h1 { margin: 0; font-size: 21px; letter-spacing: .2px; display: flex; align-items: center; gap: 9px; color: var(--white); }
-header .mark { width: 14px; height: 14px; border-radius: 3px; background: var(--white); box-shadow: 5px 5px 0 #0a0a0b; margin-right: 4px; }
+/* Team Dalton logo (orange glow on a transparent background) on a black badge so it reads on the orange bar */
+header .logo { display: inline-flex; align-items: center; background: var(--bg); border-radius: 8px; padding: 1px 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .35); }
+header .logo img { display: block; height: 32px; width: auto; }
 header .sub { margin: 3px 0 0; color: rgba(255, 255, 255, .9); font-size: 12.5px; }
 section { border-top: 1px solid var(--line); padding: 12px 0 14px; }
 section.disabled { opacity: .4; pointer-events: none; }
@@ -119,8 +122,25 @@ canvas#chart { width: 100%; height: auto; background: var(--panel-2); border: 1p
 footer { margin-top: 10px; color: var(--brand-hi); }
 #floortable input { width: 100%; padding: 4px 6px; }
 #floortable td { padding: 3px 3px; }
-#floortable td:nth-child(1) { width: 34%; }
-#floortable td:nth-child(2) { width: 30%; }
+#floortable td:nth-child(1) { width: 30%; }
+#floortable td:nth-child(2) { width: 25%; }
+#floortable td:nth-child(3) { width: 19%; }
+.row.uniform { font-size: 12.5px; color: var(--muted); }
+.row.uniform input { width: 62px; padding: 4px 6px; }
+.row.uniform button { margin-left: auto; }
+
+/* simulation modes: each [data-modes] element shows only in the modes it lists */
+.modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 4px 0 2px; border: 1px solid var(--brand);
+  border-radius: 8px; overflow: hidden; }
+.modes button { border: 0; border-radius: 0; background: transparent; color: var(--brand-hi); font-weight: 600; padding: 7px 4px; }
+.modes button + button { border-left: 1px solid var(--brand-line); }
+.modes button.on, .modes button.on:hover:not(:disabled) { background: var(--brand); color: var(--white); }
+.modehint { min-height: 3em; }
+#s-sim[data-mode="normal"] [data-modes]:not([data-modes~="normal"]),
+#s-sim[data-mode="blocked"] [data-modes]:not([data-modes~="blocked"]),
+#s-sim[data-mode="stress"] [data-modes]:not([data-modes~="stress"]) { display: none !important; }
+#s-sim > label { margin: 8px 0 2px; }
+#moresettings .grid2 { margin-top: 8px; }
 #heights button { color: var(--brand-hi); }
 #rtitle { margin: 12px 0 4px; font-weight: 600; color: var(--white); }
 #rtitle .hint { font-weight: 400; }

@@ -168,6 +168,9 @@ export class View3D {
     // agents
     const cyl = new THREE.CylinderGeometry(0.26, 0.26, 1.7, 10); cyl.translate(0, 0.85, 0);
     this.agents = new THREE.InstancedMesh(cyl, new THREE.MeshLambertMaterial({ clippingPlanes: [this.clip] }), 5000);
+    // people move every frame, but three.js works out an instanced mesh's bounds once (here: before anyone is
+    // placed) and then culls the whole crowd whenever those stale bounds leave the screen - so never cull it
+    this.agents.frustumCulled = false;
     this.agents.count = 0; this.scene.add(this.agents); this.meshes.push(this.agents);
     // camera
     const ground = (B.summary.ground_h ?? B.render.origin[1]) - B.render.origin[1];
@@ -226,6 +229,7 @@ export class View3D {
     const off = this.camera.position.clone().sub(this.controls.target).setLength(28);
     this.controls.target.set(x, y, z); this.camera.position.set(x + off.x, y + off.y, z + off.z);
   }
+  clearAgents() { if (this.agents) this.agents.count = 0; }
   setAgents(pos, colors) {
     const M = new THREE.Matrix4(); const P = colors.length; const ag = this.agents; ag.count = P;
     const hide = new THREE.Matrix4().makeScale(0, 0, 0);

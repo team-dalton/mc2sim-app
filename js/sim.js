@@ -1,9 +1,31 @@
 // Closures, evacuation runs, one-at-a-time test, results, chart and playback.
 import * as THREE from 'three';
-import { $, CLOSED_COL, EXIT_COL, GOAL_COL, UI, b64, busy, busyNote, esc, fmt } from './common.js';
+import { $, CLOSED_COL, EXIT_COL, GOAL_COL, UI, b64, busy, busyNote, esc, fmt, store, toast } from './common.js';
 import { api } from './backend.js';
-import { S, newClosed, plan, view } from './state.js';
+import { S, newClosed, plan, shownClosed, view } from './state.js';
 import { applyView, kpi, markChip, setCut } from './app.js';
+
+// ------------------------------------------------------------------ modes ---
+// Each mode shows only its own controls (CSS: [data-modes] in #s-sim) and keeps its own last run.
+export const MODES = {
+  normal: 'Everyone leaves by the quickest way out, allowing for queues at exits and stairs.',
+  blocked: "Pick exits, doors or staircases that can't be used (a fire, a locked door, building work) and compare with nothing closed.",
+  stress: 'Closes each busy exit and staircase on its own, one run each, and ranks which one matters most. Takes a little while.',
+};
+export function setSimMode(m) {
+  if (!MODES[m]) m = 'normal';
+  const prev = S.byMode[S.mode]; if (prev && S.sim === prev.res) prev.t = S.t;
+  S.mode = m; store.set('simmode', m);
+  $('#s-sim').dataset.mode = m;
+  document.querySelectorAll('#simmodes button').forEach((b) => {
+    const on = b.dataset.mode === m; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on));
+  });
+  $('#modehint').textContent = MODES[m];
+  if (!S.B) return;
+  const e = S.byMode[m];
+  if (e) useSim(e.res, e.frames, e.t || 0); else clearSim();
+}
+document.querySelectorAll('#simmodes button').forEach((b) => b.addEventListener('click', () => setSimMode(b.dataset.mode)));
 
 // -------------------------------------------------------------- scenarios ---
 export const KINDS = { exit: 'exits', door: 'doors', stairs: 'stairs' };
@@ -12,9 +34,9 @@ export function lvName(y) {
   const L = (S.B.levels || []).reduce((b, l) => (!b || Math.abs(l.elevation - y) < Math.abs(b.elevation - y) ? l : b), null);
   return L ? L.name : '';
 }
-export function closedList() {
+export function closedList(c = S.closed) {
   const out = [];
-  for (const type of ['exit', 'stairs', 'door']) for (const id of [...S.closed[type]].sort((a, b) => a - b)) out.push({ type, id });
+  for (const type of ['exit', 'stairs', 'door']) for (const id of [...c[type]].sort((a, b) => a - b)) out.push({ type, id });
   return out;
 }
 export const closureKey = (list) => list.map((c) => `${c.type}:${c.id}`).sort().join(',');
@@ -24,12 +46,17 @@ export function toggleClosure(type, id, on) {
   renderClosures();
 }
 export function closedNodes() {
-  const v = view; const N = v.walk ? v.walk.count : 0; const out = [];
+  const v = view; const N = v.walk ? v.walk.count : 0; const out = []; const c = shownClosed();
   for (let i = 0; i < N; i++) {
-    if ((v.nodeExit[i] >= 0 && S.closed.exit.has(v.nodeExit[i])) || (v.nodeDoor[i] >= 0 && S.closed.door.has(v.nodeDoor[i]))
-      || (v.nodeStair[i] >= 0 && S.closed.stairs.has(v.nodeStair[i]))) out.push(i);
+    if ((v.nodeExit[i] >= 0 && c.exit.has(v.nodeExit[i])) || (v.nodeDoor[i] >= 0 && c.door.has(v.nodeDoor[i]))
+      || (v.nodeStair[i] >= 0 && c.stairs.has(v.nodeStair[i]))) out.push(i);
   }
   return out;
+}
+function labelClick(type, id) {  // clicking an exit / stairs label closes it, which is what Blocked exits is for
+  if (S.mode === 'blocked') { toggleClosure(type, id); return; }
+  setSimMode('blocked'); toggleClosure(type, id, true);
+  toast(`Switched to Blocked exits with ${itemName(type, id)} closed. Press Run evacuation to see the effect.`, true);
 }
 export function renderClosures() {
   if (!S.B) return;
@@ -66,23 +93,24 @@ export function updateLabels() {
   const o = B.render.origin; const L = [];
   const at = (it) => ({ x: it.x - o[0], y: it.y - o[1], z: it.z - o[2] });
   const used = S.sim ? new Map(S.sim.stats.exits.filter((e) => e.people > 0).map((e) => [e.id, e.people])) : null;
+  const c = shownClosed(); const own = S.mode === 'blocked';
   let exits = used ? B.exits.filter((e) => used.has(e.id))
     : B.exits.filter((e) => e.is_door).sort((a, b) => b.width_m - a.width_m).slice(0, 12);
-  for (const id of S.closed.exit) if (!exits.some((e) => e.id === id)) exits.push(B.exits[id]);
+  for (const id of c.exit) if (!exits.some((e) => e.id === id)) exits.push(B.exits[id]);
   for (const e of exits) {
-    const shut = S.closed.exit.has(e.id);
+    const shut = c.exit.has(e.id);
     L.push({ ...at(e), text: shut ? `✕ ${e.name} closed` : used ? `${e.name} · ${used.get(e.id) || 0}` : e.name,
-      cls: shut ? 'closed' : 'exit', title: shut ? 'Click to open it again' : 'Click to close this exit', onClick: () => toggleClosure('exit', e.id) });
+      cls: shut ? 'closed' : 'exit', title: shut && own ? 'Click to open it again' : 'Click to close this exit (Blocked exits)', onClick: () => labelClick('exit', e.id) });
   }
   const sUse = S.sim ? new Map((S.sim.stats.stairs || []).map((s) => [s.id, s.people])) : null;
   for (const s of B.stairs) {
-    const shut = S.closed.stairs.has(s.id);
+    const shut = c.stairs.has(s.id);
     L.push({ ...at(s), text: shut ? `✕ ${s.name} closed` : sUse ? `${s.name} · ${sUse.get(s.id) || 0}` : s.name,
-      cls: shut ? 'closed' : 'stairs', title: shut ? 'Click to open it again' : `${s.label} — click to close it`, onClick: () => toggleClosure('stairs', s.id) });
+      cls: shut ? 'closed' : 'stairs', title: shut && own ? 'Click to open it again' : `${s.label} — click to close it (Blocked exits)`, onClick: () => labelClick('stairs', s.id) });
   }
-  for (const id of S.closed.door) {
+  for (const id of c.door) {
     const d = B.doors[id];
-    L.push({ ...at(d), text: `✕ ${d.name} closed`, cls: 'closed', title: 'Click to open it again', onClick: () => toggleClosure('door', id) });
+    L.push({ ...at(d), text: `✕ ${d.name} closed`, cls: 'closed', title: own ? 'Click to open it again' : d.name, onClick: own ? () => toggleClosure('door', id) : null });
   }
   if (S.goal) L.push({ x: S.goal.x - o[0], y: S.goal.y - o[1] + 1.6, z: S.goal.z - o[2], text: 'Assembly point', cls: 'goal' });
   view.setLabels(L);
@@ -90,11 +118,12 @@ export function updateLabels() {
 
 export function simBody() {
   const num = (id) => { const v = $('#' + id).value; return v === '' ? null : Number(v); };
+  const c = S.mode === 'blocked' ? S.closed : newClosed();   // only Blocked exits runs with your closures
   return {
     id: S.B.id, people: num('people'), placement: $('#placement').value, premove_max: num('premove_max'),
     speed_mean: num('speed_mean'), stair_factor: num('stair_factor'), seed: num('seed'),
     reroute_s: $('#reroute').checked ? 5 : 0, awareness: $('#awareness').value,
-    closed_exits: [...S.closed.exit], closed_doors: [...S.closed.door], closed_stairs: [...S.closed.stairs],
+    closed_exits: [...c.exit], closed_doors: [...c.door], closed_stairs: [...c.stairs],
     goal: S.goal ? [S.goal.x, S.goal.z] : null,
   };
 }
@@ -104,43 +133,58 @@ export async function runJob(kind, body, title) {
 }
 
 // ------------------------------------------------------------- simulation ---
-$('#run').onclick = () => busy('Simulating the evacuation…', async () => {
-  const res = await runJob('simulate', simBody(), 'Simulating the evacuation…');
-  await loadSim(res);
-  markStressRow(res.sim_id);
-});
+$('#run').onclick = () => {
+  const mode = S.mode;
+  busy('Simulating the evacuation…', async () => {
+    const res = await runJob('simulate', simBody(), 'Simulating the evacuation…');
+    await loadSim(res, mode);
+  });
+};
 $('#stress').onclick = () => busy('Closing each main exit and staircase in turn…', async () => {
   S.stress = await runJob('stress', simBody(), 'Closing each main exit and staircase in turn…');
   showStress();
-  if (S.stress.rows.length) await openStressRow(0);
-  else await openStressRow(-1);
+  await openStressRow(S.stress.rows.length ? 0 : -1);
 });
 
-export async function loadSim(res) {
-  S.frames = new Uint16Array(await api.frames(res.sim_id));   // 16-bit positions; × res.frame_step = metres, 65535 = hidden
-  S.sim = res;
-  res.density = b64(res.node_max_density, Float32Array);
-  res.congestion = b64(res.node_congested_s, Float32Array);
-  res.exitOf = b64(res.exit_of, Int16Array);
-  res.statusArr = b64(res.status, Int8Array);
-  res.T = Math.max(0, (res.frames - 1) * res.frame_dt);
-  const exitIdx = new Map(res.stats.exits.filter((e) => e.people > 0).sort((a, b) => b.people - a.people).map((e, i) => [e.id, i]));
-  res.exitColorIdx = exitIdx;
-  res.colors = Array.from(res.exitOf, (e, i) => new THREE.Color(res.statusArr[i] === 1 ? CLOSED_COL
-    : res.statusArr[i] === 3 ? '#9aa0a6' : e >= 0 && exitIdx.has(e) ? EXIT_COL[exitIdx.get(e) % EXIT_COL.length] : '#9aa0a6'));
-  res.css = res.colors.map((c) => '#' + c.getHexString());
-  // the scenario on screen is the one that was run
+// fetch a run's playback and remember it as `mode`'s run; shown straight away if that mode is still on screen
+export async function loadSim(res, mode = S.mode) {
+  const frames = new Uint16Array(await api.frames(res.sim_id));   // 16-bit positions; × res.frame_step = metres, 65535 = hidden
+  S.byMode[mode] = { res, frames, t: 0 };
+  if (S.mode === mode) useSim(res, frames, 0, true);
+}
+export function useSim(res, frames, t = 0, play = false) {
+  S.frames = frames; S.sim = res;
+  if (!res.colors) {
+    res.density = b64(res.node_max_density, Float32Array);
+    res.congestion = b64(res.node_congested_s, Float32Array);
+    res.exitOf = b64(res.exit_of, Int16Array);
+    res.statusArr = b64(res.status, Int8Array);
+    res.T = Math.max(0, (res.frames - 1) * res.frame_dt);
+    const exitIdx = new Map(res.stats.exits.filter((e) => e.people > 0).sort((a, b) => b.people - a.people).map((e, i) => [e.id, i]));
+    res.exitColorIdx = exitIdx;
+    res.colors = Array.from(res.exitOf, (e, i) => new THREE.Color(res.statusArr[i] === 1 ? CLOSED_COL
+      : res.statusArr[i] === 3 ? '#9aa0a6' : e >= 0 && exitIdx.has(e) ? EXIT_COL[exitIdx.get(e) % EXIT_COL.length] : '#9aa0a6'));
+    res.css = res.colors.map((c) => '#' + c.getHexString());
+  }
   const sc = res.stats.scenario;
-  S.closed = newClosed(); for (const c of sc.closed) S.closed[c.type].add(c.id);
-  $('#awareness').value = sc.awareness;
+  if (S.mode !== 'normal') $('#awareness').value = sc.awareness;
   if (!sc.closed.length) {
     S.use = { exits: new Map(res.stats.exits.map((e) => [e.id, e.people])), stairs: new Map((res.stats.stairs || []).map((s) => [s.id, s.people])) };
   }
   showResults(res);
   renderClosures();
-  S.t = 0; S.playing = res.T > 0; $('#play').textContent = S.playing ? '❚❚' : '▶';
+  S.t = Math.min(t, res.T); S.playing = play && res.T > 0; $('#play').textContent = S.playing ? '❚❚' : '▶';
   $('#time').max = res.T;
   $('#overlay').querySelector('[value=density]').disabled = false; $('#overlay').querySelector('[value=congestion]').disabled = false;
+  if (S.mode === 'stress') markStressRow(res.sim_id);
+}
+export function clearSim() {  // a mode with no run yet: no people, no results
+  S.sim = null; S.frames = null; S.playing = false; S.t = 0;
+  $('#results').hidden = true; view.clearAgents(); plan.agents = null;
+  const ov = $('#overlay');
+  for (const v of ['density', 'congestion']) ov.querySelector(`[value=${v}]`).disabled = true;
+  if (ov.value === 'density' || ov.value === 'congestion') ov.value = 'type';
+  renderClosures(); plan.draw();
 }
 
 export function resultsTitle() {
@@ -153,8 +197,10 @@ export function resultsTitle() {
   if (S.sim.stats.assembly) h += ' <span class="hint">· with assembly point</span>';
   const g = S.sim.params.goal; const goalNow = S.goal ? [S.goal.x, S.goal.z] : null;
   const goalChanged = JSON.stringify(g || null) !== JSON.stringify(goalNow);
-  if (closureKey(closedList()) !== closureKey(sc.closed) || goalChanged) {
-    h += `<br><span class="hint warn">${goalChanged ? 'Assembly point' : 'Closures'} changed since this run — press Run evacuation to update.</span>`;
+  const closuresChanged = S.mode === 'blocked' && closureKey(closedList()) !== closureKey(sc.closed);
+  if (closuresChanged || goalChanged) {
+    const again = S.mode === 'stress' ? 'Find the weak points' : 'Run evacuation';
+    h += `<br><span class="hint warn">${goalChanged ? 'Assembly point' : 'Closures'} changed since this run — press ${again} to update.</span>`;
   }
   $('#rtitle').innerHTML = h;
 }
@@ -169,7 +215,7 @@ export function showStress() {
     + s.rows.map((r) => `<tr class="srow" data-sim="${r.sim_id}"><td>${esc(itemName(r.closed.type, r.closed.id))}</td>
       <td class="n">${r.no_way_out ? 'never' : fmt(r.total_time_s) + ' s'}</td><td class="n">${change(r)}</td><td class="n">${fmt(r.t90_s)} s</td></tr>`).join('');
   $('#stresstable').querySelectorAll('tr.srow').forEach((tr) => {
-    tr.onclick = () => busy('Loading this scenario…', async () => { await loadSim(await api.sim(tr.dataset.sim)); markStressRow(tr.dataset.sim); });
+    tr.onclick = () => busy('Loading this scenario…', async () => { await loadSim(await api.sim(tr.dataset.sim), 'stress'); });
   });
   const w = s.rows[0]; const aware = s.awareness === 'known' ? 'before they set off' : 'only when they get there';
   let sum;
@@ -180,8 +226,7 @@ export function showStress() {
 }
 export async function openStressRow(i) {
   const id = i < 0 ? S.stress.baseline_sim : S.stress.rows[i].sim_id;
-  await loadSim(await api.sim(id));
-  markStressRow(id);
+  await loadSim(await api.sim(id), 'stress');
 }
 export function markStressRow(simId) {
   document.querySelectorAll('#stresstable tr.srow').forEach((tr) => tr.classList.toggle('on', tr.dataset.sim === simId));

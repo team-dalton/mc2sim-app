@@ -4,7 +4,7 @@ import { api, initBackend, onStatus } from './backend.js';
 import { wanted } from './local/worldfiles.js';
 import { S, map, newClosed, plan, view } from './state.js';
 import { FIX_INFO, OBJ_STYLE, PLAN_COL, SHAPES, SHAPE_WORD, TOOL_HINT, groundLevel } from './planview.js';
-import { renderClosures, resultsTitle, updateLabels } from './sim.js';
+import { renderClosures, resultsTitle, setSimMode, updateLabels } from './sim.js';
 
 map.onHover = (s) => { $('#hover').textContent = s; };
 map.onSelect = (sel) => { setSelInputs(sel); };
@@ -25,7 +25,7 @@ export function renderPlanLevels() {
   const host = $('#planlevels'); host.innerHTML = '';
   if (!S.B) return;
   S.B.levels.forEach((L, i) => {
-    const b = document.createElement('button'); b.textContent = L.name; b.title = `y ${L.elevation} · ${L.indoor_m2} m² indoors`;
+    const b = document.createElement('button'); b.textContent = L.name; b.title = `y ${L.elevation} · ${L.height} blocks tall · ${L.indoor_m2} m² indoors`;
     b.classList.toggle('on', i === plan.level);
     b.onclick = () => { plan.level = i; renderPlanLevels(); plan.draw(); };
     host.appendChild(b);
@@ -105,7 +105,7 @@ plan.onClick = (x, z) => {
 };
 
 // ---- corrections (remembered per world area in this browser)
-export const fixKeyOf = (f) => (f.kind === 'levels' ? `l:${(f.levels || []).map((l) => `${l.name || ''}@${l.elevation}`).join(';')}`
+export const fixKeyOf = (f) => (f.kind === 'levels' ? `l:${(f.levels || []).map((l) => `${l.name || ''}@${l.elevation}${l.height ? `^${l.height}` : ''}`).join(';')}`
   : f.kind === 'not_exit' ? `n:${(f.cells || [[f.x, f.y, f.z]]).map((c) => `${c[0]},${c[2]}`).sort()[0]}`
     : f.kind === 'exit' ? `c:${f.x},${f.z},${Math.round(f.y)}` : `b:${f.x},${f.y},${f.z}`);
 export function fixLevel(f) {
@@ -127,60 +127,119 @@ export function fixesChanged() {
   renderFixes(); renderFloors(); plan.draw(); plan.onHover(null);
 }
 export function fixText(f) {
-  if (f.kind === 'levels') return `Floor heights · ${(f.levels || []).map((l) => `${l.name || 'auto'} y ${l.elevation}`).join(', ')}`;
+  if (f.kind === 'levels') {
+    const ls = f.levels || []; const top = ls[ls.length - 1];
+    return `Floors · ${ls.map((l) => `${l.name || 'auto'} y ${l.elevation}`).join(', ')}${top && top.height ? ` · top floor ${top.height} blocks` : ''}`;
+  }
   return `${FIX_INFO[f.kind][0]} · ${f.label ? f.label : `x ${f.x}, z ${f.z}`}`;
 }
 
-// ---- floors: edit the height (and name) of each floor; stored as one 'levels' correction
+// ---- floors: edit where each floor is (stand-at y), how many blocks it takes up, and its name;
+//      stored as one 'levels' correction (only the top floor carries its own height: the others are the gaps)
+const MIN_FLOOR_H = 2, MAX_FLOOR_H = 50;
+const half = (v) => Math.round(v * 2) / 2;
+const median = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[(s.length - 1) >> 1] : null; };
 export function floorsDraft() {
   const f = S.fixes.find((x) => x.kind === 'levels');
-  return f ? f.levels.map((l) => ({ ...l })) : S.B.levels.map((l) => ({ name: l.name, elevation: l.elevation }));
+  const list = f ? f.levels.map((l) => ({ ...l })) : S.B.levels.map((l) => ({ name: l.name, elevation: l.elevation, height: l.height }));
+  return list.sort((a, b) => a.elevation - b.elevation);
+}
+export function floorHeights(d) {  // blocks each floor takes up: the gap to the floor above; the top floor's own height
+  const gaps = d.slice(1).map((l, i) => l.elevation - d[i].elevation);
+  if (!d.length) return [];
+  const top = d[d.length - 1]; const BL = S.B.levels; const bTop = BL[BL.length - 1];
+  const own = Number.isFinite(top.height) ? top.height
+    : bTop && Math.abs(bTop.elevation - top.elevation) < 0.01 ? bTop.height : null;
+  return [...gaps, own ?? median(gaps) ?? 4];
+}
+function groundIndex(d) {
+  const g = S.B.summary.ground_h ?? (d[0] ? d[0].elevation : 0); let best = 0;
+  d.forEach((l, i) => { if (Math.abs(l.elevation - g) < Math.abs(d[best].elevation - g)) best = i; });
+  return best;
 }
 export function setFloors(list, detected = false) {
   S.fixes = S.fixes.filter((x) => x.kind !== 'levels');
   if (!detected) {
-    const clean = list.filter((l) => Number.isFinite(l.elevation)).sort((a, b) => a.elevation - b.elevation);
+    const clean = list.filter((l) => Number.isFinite(l.elevation)).sort((a, b) => a.elevation - b.elevation)
+      .map((l, i, all) => {
+        const o = { name: l.name || '', elevation: l.elevation };
+        if (i === all.length - 1 && Number.isFinite(l.height)) o.height = l.height;
+        return o;
+      });
     S.fixes.push({ kind: 'levels', levels: clean });
   }
-  fixesChanged(); renderFloors();
+  fixesChanged();
 }
+const autoNames = (d) => d.forEach((l) => { if (/^(B?\d+F|B\d+)$/.test(l.name || '')) l.name = ''; });  // re-numbered
 export function renderFloors() {
   if (!S.B) return;
-  const draft = floorsDraft(); const sm = S.B.summary;
+  const draft = floorsDraft(); const sm = S.B.summary; const H = floorHeights(draft);
   const area = (e) => { const L = S.B.levels.find((l) => Math.abs(l.elevation - e) < 0.01); return L ? `${L.indoor_m2.toLocaleString()} m²` : 'new'; };
+  const measured = (e) => { const L = S.B.levels.find((l) => Math.abs(l.elevation - e) < 0.01); return L && L.measured_height ? L.measured_height : null; };
   const t = $('#floortable');
-  t.innerHTML = '<tr><th>Name</th><th>Stand at y</th><th class="n">Indoors</th><th></th></tr>' + [...draft].reverse().map((l, ri) => {
-    const i = draft.length - 1 - ri;
-    return `<tr><td><input class="fname" data-i="${i}" value="${esc(l.name || '')}" placeholder="auto" maxlength="24"></td>
+  t.innerHTML = '<tr><th>Name</th><th>Stand at y</th><th title="Blocks from this floor up to the floor above">Height</th><th class="n">Indoors</th><th></th></tr>'
+    + [...draft].reverse().map((l, ri) => {
+      const i = draft.length - 1 - ri; const m = measured(l.elevation);
+      const tip = (i === draft.length - 1 ? 'Top floor: blocks from its floor up to the roof.' : `Blocks up to ${esc(draft[i + 1].name || 'the next floor')}; changing it moves every floor above.`)
+        + (m ? ` Measured from the ceiling: ${m} blocks.` : '');
+      return `<tr><td><input class="fname" data-i="${i}" value="${esc(l.name || '')}" placeholder="auto" maxlength="24"></td>
       <td><input class="fy" data-i="${i}" type="number" step="0.5" value="${l.elevation}"></td>
+      <td><input class="fh" data-i="${i}" type="number" step="0.5" min="${MIN_FLOOR_H}" max="${MAX_FLOOR_H}" value="${H[i]}" title="${tip}"></td>
       <td class="n">${area(l.elevation)}</td><td class="n"><button class="ghost xs" data-del="${i}" title="Remove this floor">✕</button></td></tr>`;
-  }).join('');
+    }).join('');
   t.querySelectorAll('input.fname').forEach((el) => el.addEventListener('change', () => { const d = floorsDraft(); d[+el.dataset.i].name = el.value.trim(); setFloors(d); }));
   t.querySelectorAll('input.fy').forEach((el) => el.addEventListener('change', () => {
-    const v = Number(el.value); if (!Number.isFinite(v)) { renderFloors(); return; }
-    const d = floorsDraft(); d[+el.dataset.i].elevation = Math.round(v * 2) / 2; setFloors(d);
+    const v = Number(el.value); if (el.value === '' || !Number.isFinite(v)) { renderFloors(); return; }
+    const d = floorsDraft(); const top = floorHeights(d)[d.length - 1];
+    d[+el.dataset.i].elevation = half(v); d[d.length - 1].height = top; setFloors(d);
   }));
+  t.querySelectorAll('input.fh').forEach((el) => el.addEventListener('change', () => {
+    const v = half(Number(el.value));
+    if (el.value === '' || !Number.isFinite(v) || v < MIN_FLOOR_H || v > MAX_FLOOR_H) {
+      toast(`A floor is between ${MIN_FLOOR_H} and ${MAX_FLOOR_H} blocks tall.`, true); renderFloors(); return;
+    }
+    const d = floorsDraft(); const i = +el.dataset.i; const Hs = floorHeights(d); const last = d.length - 1;
+    if (i < last) { const shift = v - Hs[i]; for (let k = i + 1; k <= last; k++) d[k].elevation += shift; }
+    d[last].height = i === last ? v : Hs[last];
+    setFloors(d);
+  }));
+  const typical = median(H) ?? 4;
+  if (document.activeElement !== $('#floor-h')) $('#floor-h').value = typical;
   t.querySelectorAll('button[data-del]').forEach((el) => el.addEventListener('click', () => {
     const d = floorsDraft(); if (d.length <= 1) { toast('A building needs at least one floor.', true); return; }
-    d.splice(+el.dataset.del, 1); d.forEach((l) => { if (/^(B?\d+F|B\d+)$/.test(l.name || '')) l.name = ''; }); setFloors(d);
+    const i = +el.dataset.del; const Hs = floorHeights(d);
+    if (i === d.length - 1) d[i - 1].height = Hs[i - 1];   // the floor below becomes the top floor, same height
+    else d[d.length - 1].height = Hs[d.length - 1];
+    d.splice(i, 1); autoNames(d); setFloors(d);
   }));
   const used = new Set(draft.map((l) => l.elevation));
   const sh = (sm.standing_heights || []).filter(([y]) => !used.has(y));
   $('#heights').innerHTML = sh.length ? 'Common standing heights (click to add a floor there): '
     + sh.map(([y, c]) => `<button class="ghost xs" data-y="${y}">y ${y} · ${c.toLocaleString()} m²</button>`).join(' ') : '';
   $('#heights').querySelectorAll('button[data-y]').forEach((el) => el.addEventListener('click', () => {
-    const d = floorsDraft(); d.push({ name: '', elevation: Number(el.dataset.y) });
-    d.forEach((l) => { if (/^(B?\d+F|B\d+)$/.test(l.name || '')) l.name = ''; }); setFloors(d);
+    const d = floorsDraft(); const top = floorHeights(d)[d.length - 1];
+    d[d.length - 1].height = top; d.push({ name: '', elevation: Number(el.dataset.y) }); autoNames(d); setFloors(d);
   }));
   const isDetected = !S.fixes.some((x) => x.kind === 'levels');
   $('#floor-reset').disabled = isDetected;
 }
-$('#floor-add').onclick = () => {
+$('#floor-add').onclick = () => {  // a new floor on top, as tall as the current top floor
   if (!S.B) return;
-  const d = floorsDraft(); const top = d.length ? Math.max(...d.map((l) => l.elevation)) : (S.B.summary.ground_h ?? 0);
-  d.push({ name: '', elevation: top + 5 });
-  d.forEach((l) => { if (/^(B?\d+F|B\d+)$/.test(l.name || '')) l.name = ''; });  // automatic names are re-numbered
+  const d = floorsDraft(); const H = floorHeights(d);
+  const topH = d.length ? H[d.length - 1] : 4;
+  const y = d.length ? d[d.length - 1].elevation + topH : (S.B.summary.ground_h ?? 0);
+  d.push({ name: '', elevation: y, height: topH }); autoNames(d); setFloors(d);
+};
+$('#floor-h-apply').onclick = () => {  // re-space every floor from the ground floor up (and down for basements)
+  if (!S.B) return;
+  const v = half(Number($('#floor-h').value));
+  if ($('#floor-h').value === '' || !Number.isFinite(v) || v < MIN_FLOOR_H || v > MAX_FLOOR_H) {
+    toast(`A floor is between ${MIN_FLOOR_H} and ${MAX_FLOOR_H} blocks tall.`, true); return;
+  }
+  const d = floorsDraft(); const g = groundIndex(d); const base = d[g].elevation;
+  d.forEach((l, i) => { l.elevation = base + (i - g) * v; }); d[d.length - 1].height = v;
   setFloors(d);
+  toast(`Every floor is now ${v} blocks tall, counted from y ${base}. Press Apply corrections to use it.`, true);
 };
 $('#floor-reset').onclick = () => setFloors([], true);
 export function renderFixes() {
@@ -368,8 +427,9 @@ export function loadBuilding(B, opts = {}) {
   all.onclick = () => { setCut(view.size[1]); markChip(all); };
   for (const L of B.levels) {
     const b = document.createElement('button'); b.textContent = `${L.name} · y ${L.elevation}`;
-    b.title = `${L.indoor_m2} m² indoors`;
-    b.onclick = () => { setCut(L.elevation - B.render.origin[1] + 2.2); markChip(b); };
+    b.title = `${L.indoor_m2} m² indoors · ${L.height} blocks tall`;
+    // cut just above head height, but never into the floor above
+    b.onclick = () => { setCut(L.elevation - B.render.origin[1] + Math.min(2.2, (L.height || 4) - 0.9)); markChip(b); };
     lv.appendChild(b);
   }
   $('#warnings').innerHTML = (sm.warnings || []).map((w) => `<p class="warn">⚠ ${w}</p>`).join('');
@@ -388,7 +448,7 @@ export function loadBuilding(B, opts = {}) {
   ['#s-building', '#s-sim'].forEach((s) => $(s).classList.remove('disabled'));
   document.querySelector('#tabs [data-tab="3d"]').disabled = false;
   document.querySelector('#tabs [data-tab="plan"]').disabled = false;
-  S.closed = newClosed(); S.use = null; S.stress = null; $('#stressout').hidden = true;
+  S.closed = newClosed(); S.use = null; S.stress = null; S.byMode = {}; $('#stressout').hidden = true;
   setGoal(S.areaKey ? store.get('goal.' + S.areaKey, null) : null);
   renderClosures();
   tab(keep ? S.tab : '3d');
@@ -445,5 +505,6 @@ $('#dl-results').onclick = () => { if (S.sim) busy('Preparing results.json…', 
 
 // ---- start
 initBackend().then((mode) => (mode === 'local' ? setupLocalWorlds() : loadWorlds())).catch((e) => toast(e.message));
+setSimMode(store.get('simmode', 'normal'));
 map.draw();
 window.mc2sim = { S, map, plan, view };  // handle for debugging from the browser console

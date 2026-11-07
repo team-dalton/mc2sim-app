@@ -16,7 +16,7 @@
 <body>
 <aside id="side">
   <header>
-    <h1><span class="mark"></span>mc2sim</h1>
+    <h1><span class="logo"><img src="img/team-dalton.webp" alt="Team Dalton" width="1200" height="239"></span>mc2sim</h1>
     <p class="sub">Minecraft world → building model → evacuation simulation</p>
   </header>
 
@@ -70,8 +70,12 @@
     <div id="warnings"></div>
     <div class="box">
       <h3>Floors</h3>
-      <p class="hint">Each floor's height is the <b>y you stand at</b> on it (the Y in Minecraft's F3 screen). Change, add or remove floors if the detection is off, then press <b>Apply corrections</b>.</p>
+      <p class="hint"><b>Stand at y</b> is the y you stand at on that floor (the Y in Minecraft's F3 screen). <b>Height</b> is how many blocks the floor takes up, from its floor to the floor above; changing it moves every floor above. Then press <b>Apply corrections</b>.</p>
       <table id="floortable"></table>
+      <div class="row uniform">
+        <span>Every floor</span><input id="floor-h" type="number" min="2" max="50" step="0.5" aria-label="Blocks per floor"><span>blocks tall</span>
+        <button id="floor-h-apply" class="ghost">Apply to all</button>
+      </div>
       <div class="row">
         <button id="floor-add" class="ghost">+ Add floor</button>
         <button id="floor-reset" class="ghost">Use detected floors</button>
@@ -111,8 +115,14 @@
     <button id="dl-building" class="ghost">Download building.json</button>
   </section>
 
-  <section id="s-sim" class="disabled">
+  <section id="s-sim" class="disabled" data-mode="normal">
     <h2><span class="num">4</span> Evacuation</h2>
+    <div id="simmodes" class="modes" role="tablist" aria-label="Simulation mode">
+      <button data-mode="normal" class="on" role="tab">Normal</button>
+      <button data-mode="blocked" role="tab">Blocked exits</button>
+      <button data-mode="stress" role="tab">Weak points</button>
+    </div>
+    <p class="hint modehint" id="modehint"></p>
     <div class="grid2">
       <label>People<input id="people" type="number" min="1" max="5000" placeholder="auto"></label>
       <label>Placement<select id="placement">
@@ -120,12 +130,17 @@
         <option value="seats">Seats only</option>
         <option value="random">Random in rooms</option>
       </select></label>
-      <label>Reaction time up to (s)<input id="premove_max" type="number" value="10" min="0"></label>
-      <label>Walking speed (m/s)<input id="speed_mean" type="number" value="1.34" step="0.05"></label>
-      <label>Stair speed factor<input id="stair_factor" type="number" value="0.55" step="0.05"></label>
-      <label>Random seed<input id="seed" type="number" value="1"></label>
     </div>
-    <label class="check"><input type="checkbox" id="reroute" checked> People avoid queues (re-route every 5 s)</label>
+    <details id="moresettings">
+      <summary>More settings (reaction time, walking speed…)</summary>
+      <div class="grid2">
+        <label>Reaction time up to (s)<input id="premove_max" type="number" value="10" min="0"></label>
+        <label>Walking speed (m/s)<input id="speed_mean" type="number" value="1.34" step="0.05"></label>
+        <label>Stair speed factor<input id="stair_factor" type="number" value="0.55" step="0.05"></label>
+        <label>Random seed<input id="seed" type="number" value="1"></label>
+      </div>
+      <label class="check"><input type="checkbox" id="reroute" checked> People avoid queues (re-route every 5 s)</label>
+    </details>
     <div class="box">
       <h3>Assembly point</h3>
       <p id="goalinfo" class="hint">None — people stop as soon as they are outside.</p>
@@ -134,19 +149,19 @@
         <button id="goal-clear" class="ghost" disabled>Clear</button>
       </div>
     </div>
-    <div class="box scenario">
+    <div class="box scenario" data-modes="blocked">
       <h3>Closed exits, doors &amp; stairs</h3>
       <div id="closed" class="chips"></div>
       <select id="close-pick" aria-label="Close an exit, door or staircase"></select>
       <p class="hint">Or click an exit or stairs label in the 3D view. Closed spots show as red walls.</p>
-      <label>People find out about closures<select id="awareness">
-        <option value="known">Before they set off (alarm announcement)</option>
-        <option value="on_arrival">Only when they get within 5 m</option>
-      </select></label>
     </div>
-    <button id="run" class="primary">Run evacuation</button>
-    <button id="stress" class="ghost wide" title="Runs the evacuation again with each busy exit or staircase closed on its own">Test closing each main exit &amp; staircase</button>
-    <div id="stressout" hidden>
+    <label data-modes="blocked stress">People find out about closures<select id="awareness">
+      <option value="known">Before they set off (alarm announcement)</option>
+      <option value="on_arrival">Only when they get within 5 m</option>
+    </select></label>
+    <button id="run" class="primary" data-modes="normal blocked">Run evacuation</button>
+    <button id="stress" class="primary" data-modes="stress" title="Runs the evacuation again with each busy exit or staircase closed on its own">Find the weak points</button>
+    <div id="stressout" data-modes="stress" hidden>
       <h3>One closure at a time <span class="hint">(click a row to watch it)</span></h3>
       <p id="stresssum" class="hint"></p>
       <table id="stresstable"></table>

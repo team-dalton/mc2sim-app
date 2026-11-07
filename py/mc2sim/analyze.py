@@ -443,13 +443,36 @@ def _find_doors(b: Building):
                         "is_exit": bool((b.exit_id[nodes] >= 0).any()), "nodes": nodes.tolist()})
 
 
+def _measured_height(b: Building, cells: np.ndarray) -> float | None:
+    """Storey height in blocks measured from the ceiling: from where people stand on these cells to the top of
+    the first block above their heads (where the floor above would stand). Median over the cells, 0.5 steps;
+    None when most of them are open to the sky."""
+    if len(cells) < 4:
+        return None
+    oy = b.origin[1]
+    Y = b.shape.shape[1]
+    cols = b.shape[b.nx[cells], :, b.nz[cells]]                       # [n, Y]
+    y0 = np.ceil(b.h[cells] - oy - 1e-6).astype(np.int64)          # first block fully above the standing surface
+    above = np.arange(Y)[None, :] >= y0[:, None]
+    roof = above & (cols != PASS) & (cols != DOOR)
+    has = roof.any(axis=1)
+    if has.sum() < max(4, 0.5 * len(cells)):
+        return None
+    top = roof[has].argmax(axis=1) + oy + 1                          # top of the first block overhead, world y
+    return float(np.round(np.median(top - b.h[cells][has]) * 2) / 2)
+
+
 def _find_levels(b: Building, override: dict | None = None):
     """Floors = the most common indoor standing heights (>= 2 m apart). A 'levels' correction
-    ({"kind": "levels", "levels": [{"elevation": y, "name": "1F"}, ...]}) replaces the detection;
-    elevation is the y you stand at on that floor (what Minecraft's F3 screen shows)."""
+    ({"kind": "levels", "levels": [{"elevation": y, "name": "1F", "height": 5}, ...]}) replaces the detection;
+    elevation is the y you stand at on that floor (what Minecraft's F3 screen shows).
+
+    Each floor's `height` (blocks it occupies) is the gap to the floor above; for the top floor it is the
+    correction's height if given, else measured from its ceiling, else the usual gap between floors."""
     m = b.indoor & (b.kind != STAIR)
     chosen: list[float] = []
     names: dict[float, str] = {}
+    given_h: dict[float, float] = {}
     if m.any():
         hv = np.round(b.h[m] * 2) / 2
         uniq, cnt = np.unique(hv, return_counts=True)
@@ -479,6 +502,12 @@ def _find_levels(b: Building, override: dict | None = None):
             given.append(e)
             if str(lv.get("name") or "").strip():
                 names[e] = str(lv["name"]).strip()[:24]
+            try:
+                hgt = round(float(lv["height"]) * 2) / 2
+                if 1 <= hgt <= 100:
+                    given_h[e] = hgt
+            except (KeyError, TypeError, ValueError):
+                pass
         if given:
             chosen = sorted(given)
         else:
@@ -492,8 +521,13 @@ def _find_levels(b: Building, override: dict | None = None):
     b.level = np.where(d.min(axis=1) <= 1.5, near, -1)
     # ground floor = level closest to ground height
     g = int(np.abs(lv - (b.ground_h if b.ground_h is not None else lv[0])).argmin())
-    b.levels = [{"id": i, "name": names.get(e) or _floor_name(i - g), "elevation": float(e),
-                 "indoor_m2": int(((b.level == i) & b.indoor).sum())} for i, e in enumerate(chosen)]
+    measured = [_measured_height(b, np.nonzero((b.level == i) & m)[0]) for i in range(len(chosen))]
+    gaps = np.diff(lv)
+    top = given_h.get(chosen[-1]) or measured[-1] or (float(np.median(gaps)) if len(gaps) else 4.0)
+    heights = [float(x) for x in gaps] + [float(top)]
+    b.levels = [{"id": i, "name": names.get(e) or _floor_name(i - g), "elevation": float(e), "height": heights[i],
+                 "measured_height": measured[i], "indoor_m2": int(((b.level == i) & b.indoor).sum())}
+                for i, e in enumerate(chosen)]
 
 
 def _find_stairs(b: Building):

@@ -1,7 +1,7 @@
 // Per-floor 2D plan: cached floor image, furniture, labels, corrections, assembly point, people.
 import * as THREE from 'three';
 import { $, CAT, CLOSED_COL, GOAL_COL, UI, b64, clamp, heatColor, outlinedText } from './common.js';
-import { S, view } from './state.js';
+import { S, shownClosed, view } from './state.js';
 import { fixKeyOf, fixLevel, overlayData } from './app.js';
 
 // ------------------------------------------------------------- floor plan ---
@@ -213,17 +213,17 @@ export class PlanView {
       g.beginPath(); g.roundRect(r[0], r[1], w, 16, 4); g.fill(); g.stroke();
       g.fillStyle = color; g.textAlign = 'center'; g.fillText(text, sx, sy - 8);
     };
-    const floorName = B.levels[L].name;
+    const floorName = B.levels[L].name; const shut = shownClosed();
     for (const st of B.stairs) {   // closed things and staircases first, then exits from widest to narrowest
       if (!st.levels.includes(floorName)) continue;
-      const [sx, sy] = at(st.x, st.z); const shut = S.closed.stairs.has(st.id);
-      if (shut) tag(`✕ ${st.name} closed`, sx, sy, CLOSED_COL, CLOSED_COL, '#fff', true); else tag(st.name, sx, sy, UI.brand, UI.tag, UI.ink, true);
+      const [sx, sy] = at(st.x, st.z);
+      if (shut.stairs.has(st.id)) tag(`✕ ${st.name} closed`, sx, sy, CLOSED_COL, CLOSED_COL, '#fff', true); else tag(st.name, sx, sy, UI.brand, UI.tag, UI.ink, true);
     }
     const exits = B.exits.filter((e) => nearestLevel(e.y) === L)
-      .sort((a, b) => S.closed.exit.has(b.id) - S.closed.exit.has(a.id) || b.is_door - a.is_door || b.width_m - a.width_m);
+      .sort((a, b) => shut.exit.has(b.id) - shut.exit.has(a.id) || b.is_door - a.is_door || b.width_m - a.width_m);
     for (const e of exits) {
       const [sx, sy] = at(e.x, e.z);
-      if (S.closed.exit.has(e.id)) tag(`✕ ${e.name} closed`, sx, sy, CLOSED_COL, CLOSED_COL, '#fff', true);
+      if (shut.exit.has(e.id)) tag(`✕ ${e.name} closed`, sx, sy, CLOSED_COL, CLOSED_COL, '#fff', true);
       else tag(e.name, sx, sy, '#ff6b6b');
     }
     // corrections
