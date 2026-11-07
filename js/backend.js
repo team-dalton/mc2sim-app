@@ -4,7 +4,7 @@
 //    picked as a folder or .zip and read in this tab; buildings and results never leave the browser.
 // Choose with ?mode=local or ?mode=server; a static build (`mc2sim site`) sets <meta name="mc2sim-mode" content="local">.
 // Otherwise the server is used when one answers. Imports only common.js, so any module may import it.
-import { getJSON, postJSON } from './common.js';
+import { getJSON, postJSON } from './common.js?v=8126566452';
 
 export const api = { mode: null };
 let statusListener = () => {};
@@ -47,7 +47,7 @@ function serverBackend() {
 }
 
 function localBackend() {
-  const worker = new Worker(new URL('./local/worker.js', import.meta.url), { type: 'module' });
+  const worker = new Worker(new URL('./local/worker.js?v=8126566452', import.meta.url), { type: 'module' });
   const pending = new Map(); let next = 1;
   worker.onmessage = ({ data }) => {
     if (data.status !== undefined) { statusListener(data.status); return; }

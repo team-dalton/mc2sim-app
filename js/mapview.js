@@ -1,6 +1,6 @@
 // Top-down world map (region tiles) with pan, zoom and box selection.
-import { $, UI, outlinedText } from './common.js';
-import { api } from './backend.js';
+import { $, UI, outlinedText } from './common.js?v=8126566452';
+import { api } from './backend.js?v=8126566452';
 
 // ---------------------------------------------------------------- map view ---
 export class MapView {

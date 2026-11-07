@@ -1,8 +1,8 @@
 // Per-floor 2D plan: cached floor image, furniture, labels, corrections, assembly point, people.
 import * as THREE from 'three';
-import { $, CAT, CLOSED_COL, GOAL_COL, UI, b64, clamp, heatColor, outlinedText } from './common.js';
-import { S, shownClosed, view } from './state.js';
-import { fixKeyOf, fixLevel, overlayData } from './app.js';
+import { $, CAT, CLOSED_COL, GOAL_COL, UI, b64, clamp, heatColor, outlinedText } from './common.js?v=8126566452';
+import { S, shownClosed, view } from './state.js?v=8126566452';
+import { fixKeyOf, fixLevel, overlayData } from './app.js?v=8126566452';
 
 // ------------------------------------------------------------- floor plan ---
 export const SHAPES = ['pass', 'solid', 'slab', 'stairs', 'barrier', 'obstacle', 'door', 'liquid'];

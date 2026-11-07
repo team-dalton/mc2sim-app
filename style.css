@@ -33,13 +33,11 @@ body { display: flex; overflow: hidden; }
 #side::-webkit-scrollbar-thumb { background: var(--brand); border-radius: 5px; border: 2px solid var(--panel); }
 #side::-webkit-scrollbar-track { background: var(--panel); }
 ::selection { background: var(--brand); color: var(--white); }
-header { margin: 0 -16px; padding: 14px 16px 13px; background: linear-gradient(120deg, #a84300 0%, #cc5500 55%, #d9651c 100%); }
-header h1 { margin: 0; font-size: 21px; letter-spacing: .2px; display: flex; align-items: center; gap: 9px; color: var(--white); }
-/* Team Dalton logo (orange glow on a transparent background) on a black badge so it reads on the orange bar */
-header .logo { display: inline-flex; align-items: center; background: var(--bg); border-radius: 8px; padding: 1px 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .35); }
-header .logo img { display: block; height: 32px; width: auto; }
-header .sub { margin: 3px 0 0; color: rgba(255, 255, 255, .9); font-size: 12.5px; }
+header { margin: 0 -16px; padding: 12px 16px 11px; background: var(--bg); border-bottom: 3px solid var(--brand); }
+header h1 { margin: 0; font-size: 21px; letter-spacing: .2px; display: flex; align-items: center; gap: 8px; color: var(--white); }
+/* Team Dalton logo: orange glow on a transparent background, so it sits straight on the black header */
+header .logo { display: block; height: 25px; width: auto; margin-left: -4px; }
+header .sub { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
 section { border-top: 1px solid var(--line); padding: 12px 0 14px; }
 section.disabled { opacity: .4; pointer-events: none; }
 h2 { font-size: 14.5px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; color: var(--brand-hi); }

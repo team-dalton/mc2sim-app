@@ -1,9 +1,9 @@
 // Closures, evacuation runs, one-at-a-time test, results, chart and playback.
 import * as THREE from 'three';
-import { $, CLOSED_COL, EXIT_COL, GOAL_COL, UI, b64, busy, busyNote, esc, fmt, store, toast } from './common.js';
-import { api } from './backend.js';
-import { S, newClosed, plan, shownClosed, view } from './state.js';
-import { applyView, kpi, markChip, setCut } from './app.js';
+import { $, CLOSED_COL, EXIT_COL, GOAL_COL, UI, b64, busy, busyNote, esc, fmt, store, toast } from './common.js?v=8126566452';
+import { api } from './backend.js?v=8126566452';
+import { S, newClosed, plan, shownClosed, view } from './state.js?v=8126566452';
+import { applyView, kpi, markChip, setCut } from './app.js?v=8126566452';
 
 // ------------------------------------------------------------------ modes ---
 // Each mode shows only its own controls (CSS: [data-modes] in #s-sim) and keeps its own last run.

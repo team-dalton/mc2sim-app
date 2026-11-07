@@ -2,7 +2,7 @@
 // The page sends requests as messages ({ id, op, args }); answers come back as { id, result } or { id, error },
 // with { id, progress } for long jobs and { status } while Python loads. World files are read here, from the
 // folder or .zip the user picked; nothing is uploaded, and nothing is stored once the tab is closed.
-import { openWorld } from './worldfiles.js';
+import { openWorld } from './worldfiles.js?v=8126566452';
 
 const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v314.0.7/full/';   // pinned; a static build may point elsewhere
 const MODULES = ['__init__', 'nbt', 'blocks', 'world', 'analyze', 'sim', 'export', 'scenarios', 'demo', 'api', 'browser'];
@@ -16,9 +16,10 @@ async function load(url) {
   await py.loadPackage(['numpy', 'scipy'], { messageCallback: () => {} });
   postMessage({ status: 'Loading the mc2sim code…' });
   const base = new URL('../../py/mc2sim/', import.meta.url);
+  const v = new URL(import.meta.url).search;   // ?v=<build> in a static build: never mix new scripts with cached .py files
   py.FS.mkdirTree('/home/pyodide/mc2sim');
   await Promise.all(MODULES.map(async (m) => {
-    const r = await fetch(new URL(m + '.py', base));
+    const r = await fetch(new URL(m + '.py' + v, base));
     if (!r.ok) throw new Error(`Could not load ${m}.py (${r.status}).`);
     py.FS.writeFile(`/home/pyodide/mc2sim/${m}.py`, await r.text());
   }));
