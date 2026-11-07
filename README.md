@@ -1,6 +1,6 @@
 # mc2sim — Minecraft world → building model → evacuation simulation
 
-**Open the app: https://taichiops.github.io/mc2sim-app/**
+**Open the app: https://team-dalton.github.io/mc2sim-app/**
 
 This repository holds only the built website. Everything runs in your browser: the Python code (in `py/`)
 runs with [Pyodide](https://pyodide.org) in a Web Worker. The Minecraft world you pick (a world folder or a `.zip`
