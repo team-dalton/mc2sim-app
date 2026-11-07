@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="mc2sim-mode" content="local">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mc2sim — Minecraft to Simulation</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<aside id="side">
+  <header>
+    <h1><span class="mark"></span>mc2sim</h1>
+    <p class="sub">Minecraft world → building model → evacuation simulation</p>
+  </header>
+
+  <section id="s-world">
+    <h2><span class="num">1</span> World</h2>
+    <div class="row">
+      <select id="world"></select>
+      <button id="open">Open</button>
+    </div>
+    <label class="check"><input type="checkbox" id="refresh"> Re-copy the save (after editing in Minecraft)</label>
+    <div id="localworld" hidden>
+      <div class="row">
+        <button id="pick-folder">Choose world folder…</button>
+        <button id="pick-zip" class="ghost">Open a .zip…</button>
+      </div>
+      <input type="file" id="folder-input" webkitdirectory hidden>
+      <input type="file" id="zip-input" accept=".zip,application/zip" hidden>
+      <p class="hint">Pick the world's own folder (it contains <code>level.dat</code>) in your Minecraft <code>saves</code> folder:
+        <code>~/Library/Application Support/minecraft/saves</code> on a Mac (press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> in the picker),
+        <code>%APPDATA%\.minecraft\saves</code> on Windows. Your browser may call this an upload; the files are only read on this computer.</p>
+      <p class="hint" id="pystatus">Loading the simulator…</p>
+    </div>
+    <p class="hint" id="worldinfo">Your saves are copied first; the originals are never modified.</p>
+    <button id="demo" class="ghost">Or try the built-in demo building</button>
+  </section>
+
+  <section id="s-select" class="disabled">
+    <h2><span class="num">2</span> Select the building</h2>
+    <p class="hint">Hold <kbd>Shift</kbd> and drag on the map (or use <b>Select</b> mode) to draw a box around the building. Scroll to zoom, drag to pan.</p>
+    <div class="row seg">
+      <button id="mode-pan" class="on">Pan</button>
+      <button id="mode-select">Select</button>
+      <button id="goto-player" class="ghost">Go to player</button>
+    </div>
+    <div class="grid4">
+      <label>x from<input id="x0" type="number"></label>
+      <label>z from<input id="z0" type="number"></label>
+      <label>x to<input id="x1" type="number"></label>
+      <label>z to<input id="z1" type="number"></label>
+      <label>y min<input id="ymin" type="number" placeholder="auto"></label>
+      <label>y max<input id="ymax" type="number" placeholder="auto"></label>
+    </div>
+    <p class="hint" id="selinfo"></p>
+    <button id="convert" class="primary">Convert to building model</button>
+  </section>
+
+  <section id="s-building" class="disabled">
+    <h2><span class="num">3</span> Building</h2>
+    <div id="bsummary" class="kpis"></div>
+    <div id="levels" class="chips"></div>
+    <div id="warnings"></div>
+    <div class="box">
+      <h3>Floors</h3>
+      <p class="hint">Each floor's height is the <b>y you stand at</b> on it (the Y in Minecraft's F3 screen). Change, add or remove floors if the detection is off, then press <b>Apply corrections</b>.</p>
+      <table id="floortable"></table>
+      <div class="row">
+        <button id="floor-add" class="ghost">+ Add floor</button>
+        <button id="floor-reset" class="ghost">Use detected floors</button>
+      </div>
+      <p class="hint" id="heights"></p>
+    </div>
+    <div class="grid2">
+      <label>Blocks<select id="blockmode">
+        <option value="real">Block colours</option>
+        <option value="role">By function</option>
+        <option value="ghost">Faded</option>
+        <option value="off">Hidden</option>
+      </select></label>
+      <label>Floor overlay<select id="overlay">
+        <option value="type">Walkable: type</option>
+        <option value="floor">Walkable: floor</option>
+        <option value="room">Walkable: room</option>
+        <option value="density" disabled>Max crowd density</option>
+        <option value="congestion" disabled>Time congested</option>
+        <option value="off">Off</option>
+      </select></label>
+    </div>
+    <label class="slider">Cut height (3D) <span id="cutval"></span><input id="cut" type="range" min="0" max="100" step="0.5"></label>
+    <div class="box">
+      <h3>Corrections</h3>
+      <p class="hint">Something misread? Open the <b>Floor plan</b> tab, pick a tool (real exit, not an exit, chair, table…) and click the spot. Corrections are remembered for this area.</p>
+      <div id="fixlist" class="chips"></div>
+      <div class="row">
+        <button id="fix-apply" class="primary small" disabled>Apply corrections</button>
+        <button id="fix-plan" class="ghost">Open floor plan</button>
+      </div>
+    </div>
+    <details>
+      <summary>Detected rooms, doors &amp; furniture</summary>
+      <div id="details"></div>
+    </details>
+    <button id="dl-building" class="ghost">Download building.json</button>
+  </section>
+
+  <section id="s-sim" class="disabled">
+    <h2><span class="num">4</span> Evacuation</h2>
+    <div class="grid2">
+      <label>People<input id="people" type="number" min="1" max="5000" placeholder="auto"></label>
+      <label>Placement<select id="placement">
+        <option value="auto">Seats, then random</option>
+        <option value="seats">Seats only</option>
+        <option value="random">Random in rooms</option>
+      </select></label>
+      <label>Reaction time up to (s)<input id="premove_max" type="number" value="10" min="0"></label>
+      <label>Walking speed (m/s)<input id="speed_mean" type="number" value="1.34" step="0.05"></label>
+      <label>Stair speed factor<input id="stair_factor" type="number" value="0.55" step="0.05"></label>
+      <label>Random seed<input id="seed" type="number" value="1"></label>
+    </div>
+    <label class="check"><input type="checkbox" id="reroute" checked> People avoid queues (re-route every 5 s)</label>
+    <div class="box">
+      <h3>Assembly point</h3>
+      <p id="goalinfo" class="hint">None — people stop as soon as they are outside.</p>
+      <div class="row">
+        <button id="goal-set">Set on floor plan</button>
+        <button id="goal-clear" class="ghost" disabled>Clear</button>
+      </div>
+    </div>
+    <div class="box scenario">
+      <h3>Closed exits, doors &amp; stairs</h3>
+      <div id="closed" class="chips"></div>
+      <select id="close-pick" aria-label="Close an exit, door or staircase"></select>
+      <p class="hint">Or click an exit or stairs label in the 3D view. Closed spots show as red walls.</p>
+      <label>People find out about closures<select id="awareness">
+        <option value="known">Before they set off (alarm announcement)</option>
+        <option value="on_arrival">Only when they get within 5 m</option>
+      </select></label>
+    </div>
+    <button id="run" class="primary">Run evacuation</button>
+    <button id="stress" class="ghost wide" title="Runs the evacuation again with each busy exit or staircase closed on its own">Test closing each main exit &amp; staircase</button>
+    <div id="stressout" hidden>
+      <h3>One closure at a time <span class="hint">(click a row to watch it)</span></h3>
+      <p id="stresssum" class="hint"></p>
+      <table id="stresstable"></table>
+      <p class="hint">Same people and settings in every run. Differences of about 10 s or less are within run-to-run noise.</p>
+    </div>
+    <div id="results" hidden>
+      <p id="rtitle"></p>
+      <div id="rkpis" class="kpis"></div>
+      <div id="compare" class="compare" hidden></div>
+      <canvas id="chart" width="680" height="260" aria-label="People evacuated over time"></canvas>
+      <p class="hint" id="agentkey">People are coloured by the exit they use; <span class="bad">red</span> = no way out.</p>
+      <div class="player">
+        <button id="play" class="icon" title="Play / pause">▶</button>
+        <input id="time" type="range" min="0" max="1" step="0.01" value="0">
+        <select id="speed"><option>1</option><option selected>5</option><option>20</option></select>
+        <span id="clock">0 s</span>
+      </div>
+      <h3>Exits used</h3>
+      <table id="exits"></table>
+      <h3>Staircases</h3>
+      <table id="stairsout"></table>
+      <h3>Floors cleared</h3>
+      <table id="levelsout"></table>
+      <h3>Congestion hotspots <span class="hint">(click to look)</span></h3>
+      <ol id="hotspots"></ol>
+      <button id="dl-results" class="ghost">Download results.json</button>
+    </div>
+  </section>
+  <footer class="hint">Prototype — model parameters are literature defaults, not a certified egress analysis.</footer>
+</aside>
+
+<main>
+  <nav id="tabs">
+    <button data-tab="map" class="on">Map</button>
+    <button data-tab="plan" disabled>Floor plan</button>
+    <button data-tab="3d" disabled>3D model</button>
+    <span id="hover"></span>
+  </nav>
+  <div id="mapwrap"><canvas id="map"></canvas></div>
+  <div id="planwrap" hidden>
+    <canvas id="plan"></canvas>
+    <div id="plantools">
+      <div id="planlevels" class="chips"></div>
+      <div id="tools" class="chips">
+        <button data-tool="look" class="on" title="Pan, zoom and inspect">Look</button>
+        <span class="sep"></span>
+        <button data-tool="exit" title="Mark a walkable spot as a real way out">Real exit</button>
+        <button data-tool="not_exit" title="Mark a detected exit as unusable">Not an exit</button>
+        <span class="sep"></span>
+        <button data-tool="chair" title="This block is a chair">Chair</button>
+        <button data-tool="table" title="This block is a table">Table</button>
+        <button data-tool="stairs" title="This stair block is a staircase, not a chair">Stairs</button>
+        <button data-tool="obstacle" title="Just an obstacle, no furniture">Obstacle</button>
+        <button data-tool="open" title="People can walk through this block">Walk-through</button>
+        <span class="sep"></span>
+        <button data-tool="goal" title="Where everyone gathers after getting out">Assembly point</button>
+        <button data-tool="erase" title="Remove a correction">Erase</button>
+      </div>
+      <p id="toolhint"></p>
+    </div>
+    <div id="planinfo"></div>
+  </div>
+  <div id="view3d" hidden>
+    <div id="labels"></div>
+    <div id="viewtools" class="chips">
+      <button id="cam-orbit" class="on" title="Rotate around the building">Orbit</button>
+      <button id="cam-fly" title="Fly through the building like Minecraft's spectator mode">Fly (spectator)</button>
+    </div>
+    <div id="flyhud" hidden></div>
+  </div>
+  <div id="legend"></div>
+  <div id="busy" hidden><div class="spinner"></div><span id="busytext">Working…</span></div>
+  <div id="toast" role="status"></div>
+</main>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
