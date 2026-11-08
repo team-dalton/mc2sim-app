@@ -31,7 +31,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
 from scipy.spatial import cKDTree
 
-from .analyze import FLOOR, OPP, STAIR, Building
+from .analyze import DIRS, FLOOR, OPP, STAIR, Building
 
 S = 4                 # sub-cells per block side
 CS = 1.0 / S          # sub-cell size (m)
@@ -192,8 +192,41 @@ def _connected_to_safe(b: Building) -> np.ndarray:
     return np.isin(lab, np.unique(lab[b.safe]))
 
 
+def _with_ground_steps(b: Building) -> Building:
+    """Copy in which neighbouring open-ground (safe) cells one block apart are linked: on the way to the assembly
+    point people step up or down a curb, the edge of a sunken plaza or a terrace. Only safe cells get these links,
+    so the evacuation itself (and what counts as an exit) is unchanged; indoors only stairs climb a full block."""
+    nbr = b.nbr.copy()
+    X, _, Z = b.ids.shape
+    safe = np.nonzero(b.safe)[0]
+    key = b.nx[safe] * Z + b.nz[safe]
+    order = np.argsort(key, kind="stable")
+    ks, ss = key[order], safe[order]
+    for k in range(4):
+        dx, dz = DIRS[k]
+        free = safe[nbr[safe, k] < 0]
+        tx, tz = b.nx[free] + dx, b.nz[free] + dz
+        inb = (tx >= 0) & (tx < X) & (tz >= 0) & (tz < Z)
+        free, tk = free[inb], (tx * Z + tz)[inb]
+        lo, hi = np.searchsorted(ks, tk, "left"), np.searchsorted(ks, tk, "right")
+        for j in range(int((hi - lo).max(initial=0))):     # a column rarely holds more than one open-ground cell
+            has = lo + j < hi
+            i_, c = free[has], ss[lo[has] + j]
+            ok = (np.abs(b.h[c] - b.h[i_]) <= 1.01) & (nbr[i_, k] < 0) & (nbr[c, OPP[k]] < 0)
+            nbr[i_[ok], k] = c[ok]
+            nbr[c[ok], OPP[k]] = i_[ok]
+    for k in range(4):                                       # keep only mutual links
+        has = nbr[:, k] >= 0
+        back = np.full(b.n, -1, np.int64)
+        back[has] = nbr[nbr[has, k], OPP[k]]
+        nbr[has & (back != np.arange(b.n)), k] = -1
+    return dataclasses.replace(b, nbr=nbr)
+
+
 def _goal_setup(b: Building, phys: Building, goal, p: SimParams):
-    """Assembly point: nearest open-ground (safe) cell to `goal` [x, z] and a field over the safe area around it."""
+    """Assembly point: nearest open-ground (safe) cell to `goal` [x, z], a field over the open ground connected to
+    it, and one for open ground cut off from it (fenced in, or only joined outside the selected area): people who
+    come out there walk to the spot of their piece of ground closest to the assembly point and wait there."""
     if not b.safe.any():
         raise ValueError("There is no open ground around the building, so an assembly point cannot be used.")
     gx, gz = float(goal[0]) - b.origin[0], float(goal[1]) - b.origin[2]
@@ -208,8 +241,17 @@ def _goal_setup(b: Building, phys: Building, goal, p: SimParams):
     area = lab == lab[g]
     targets = np.zeros(b.n, bool)
     targets[g] = True
-    nav = NavGrid(b, p, nodes=area, targets=targets, queues=False)
-    return g, area, nav
+    nav = NavGrid(phys, p, nodes=area, targets=targets, queues=False)
+    rest = b.safe & ~area
+    near = None
+    if rest.any():
+        dist = np.hypot(b.nx + 0.5 - gx, b.nz + 0.5 - gz)
+        closest = np.zeros(b.n, bool)
+        for c in np.unique(lab[rest]):
+            m = lab == c
+            closest |= m & (dist <= dist[m].min() + 0.25)
+        near = NavGrid(phys, p, nodes=rest, targets=closest, queues=False)
+    return g, area, nav, near
 
 
 def _queue_areas(b: Building, queue_m: float) -> np.ndarray:
@@ -449,6 +491,8 @@ def simulate(b: Building, p: SimParams | None = None, progress=None) -> SimResul
     closed = closed_nodes(b, p)
     any_closed = bool(closed.any())
     phys = with_closed(b, closed) if any_closed else b      # closed cells are walls for movement
+    if p.goal:
+        phys = _with_ground_steps(phys)                      # outside, curbs and plaza edges can be stepped
     nav = NavGrid(b, p, closed if any_closed else None)
     reach_open = np.isfinite(nav.node_distance(nav.D_open))
     reach = np.isfinite(nav.node_distance(nav.D))
@@ -489,10 +533,10 @@ def simulate(b: Building, p: SimParams | None = None, progress=None) -> SimResul
     p_tell = 0.0 if everyone_knows else 1.0 - np.exp(-p.tell_rate * p.dt)
     dist0 = nav.node_distance()
     # assembly point: after leaving the building people walk there and join the group
-    goal_node, goal_area, gnav = _goal_setup(b, phys, p.goal, p) if p.goal else (None, None, None)
+    goal_node, goal_area, gnav, near_nav = _goal_setup(b, phys, p.goal, p) if p.goal else (None, None, None, None)
     outside = np.zeros(P, bool)        # left the building, walking to the assembly point
     assembled = np.zeros(P, bool)
-    lost = np.zeros(P, bool)           # out, but the assembly point cannot be reached from where they came out
+    lost = np.zeros(P, bool)           # out on ground cut off from the assembly point: they get as close as they can
     asm_time = np.full(P, np.nan)
     asm_radius = 2.0 + 1.3 * np.sqrt(max(P, 1) / (2 * np.pi))   # area the group fills (~2 people/m2)
     asm_tree = None
@@ -552,6 +596,10 @@ def simulate(b: Building, p: SimParams | None = None, progress=None) -> SimResul
             queue = np.bincount(qa[qa >= 0], minlength=len(nav.exit_cap)).astype(float)
             nav.update(np.bincount(node[idx], minlength=b.n).astype(float), p.congestion_weight,
                        open_field=not informed[idx].all(), queue=queue)
+            if gnav is not None:                  # the walk to the assembly point avoids crowds too
+                wi = idx[outside[idx] & ~lost[idx]]
+                if len(wi):
+                    gnav.update(np.bincount(node[wi], minlength=b.n).astype(float), p.congestion_weight)
         x, z, nd = px[idx], pz[idx], node[idx]
         moving = t >= t0[idx]
         # desired direction from the distance field (people who have not noticed a closure use the open one;
@@ -559,7 +607,9 @@ def simulate(b: Building, p: SimParams | None = None, progress=None) -> SimResul
         know = informed[idx]
         e = np.zeros((len(idx), 2))
         to_goal = outside[idx] & goal_area[nd] if gnav is not None else np.zeros(len(idx), bool)
-        main = (nav.slot[nd] >= 0) & ~to_goal
+        to_near = outside[idx] & lost[idx] & (near_nav.slot[nd] >= 0) if near_nav is not None \
+            else np.zeros(len(idx), bool)
+        main = (nav.slot[nd] >= 0) & ~to_goal & ~to_near
         mk, mu = main & know, main & ~know
         if mk.any():
             e[mk] = nav.direction(subcell(x[mk], z[mk], nd[mk]), nav.D)
@@ -567,6 +617,8 @@ def simulate(b: Building, p: SimParams | None = None, progress=None) -> SimResul
             e[mu] = nav.direction(subcell(x[mu], z[mu], nd[mu]), nav.D_open)
         if to_goal.any():
             e[to_goal] = gnav.direction(gnav.subcell(x[to_goal], z[to_goal], nd[to_goal]), gnav.D)
+        if to_near.any():
+            e[to_near] = near_nav.direction(near_nav.subcell(x[to_near], z[to_near], nd[to_near]), near_nav.D)
         speed = v0[idx] * np.where(b.kind[nd] == STAIR, p.stair_factor, 1.0) * moving
         ax = (speed * e[:, 0] - vx[idx]) / p.tau
         az = (speed * e[:, 1] - vz[idx]) / p.tau
@@ -651,8 +703,9 @@ def simulate(b: Building, p: SimParams | None = None, progress=None) -> SimResul
             else:
                 outside[ai] = True
                 cant = ai[~goal_area[node[ai]]]
-                active[cant] = False
                 lost[cant] = True
+                if near_nav is None:
+                    active[cant] = False
         # assembly point: arrive at the centre, or join the group once touching someone already there
         if gnav is not None:
             o = outside[idx] & active[idx] & goal_area[nd]
@@ -671,6 +724,22 @@ def simulate(b: Building, p: SimParams | None = None, progress=None) -> SimResul
                     asm_time[ji] = t
                     vx[ji] = vz[ji] = 0.0
                     asm_tree = cKDTree(np.column_stack([px[assembled], pz[assembled]]))
+            if near_nav is not None:              # cut off: wait as close to the assembly point as they can get,
+                li = np.nonzero(lost[idx] & active[idx])[0]     # in a group like the one at the assembly point
+                li = li[near_nav.slot[nd[li]] >= 0]
+                if len(li):
+                    dn = near_nav.D[near_nav.subcell(x[li], z[li], nd[li])]
+                    stop = dn <= 1.0
+                    waiting = np.nonzero(lost & ~active)[0]
+                    reach_r = 2.0 + 1.3 * np.sqrt(len(waiting) / (2 * np.pi))
+                    near_g = ~stop & (dn <= reach_r)
+                    if len(waiting) and near_g.any():
+                        dd, _ = cKDTree(np.column_stack([px[waiting], pz[waiting]])).query(
+                            np.column_stack([x[li[near_g]], z[li[near_g]]]))
+                        stop[np.nonzero(near_g)[0][dd <= 2 * r + 0.1]] = True
+                    si = idx[li[stop]]
+                    active[si] = False
+                    vx[si] = vz[si] = 0.0
         # closures: people notice them nearby, turn back, or find there is no way out
         if any_closed:
             still = ~arrived & ~outside[idx]

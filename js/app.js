@@ -1,10 +1,10 @@
 // Entry point: world, selection, building panel, floors, corrections, floor-plan tools, assembly point.
-import { $, CAT, GOAL_COL, HEAT, TYPE_COL, UI, busy, busyNote, esc, store, toast } from './common.js?v=8126566452';
-import { api, initBackend, onStatus } from './backend.js?v=8126566452';
-import { wanted } from './local/worldfiles.js?v=8126566452';
-import { S, map, newClosed, plan, view } from './state.js?v=8126566452';
-import { FIX_INFO, OBJ_STYLE, PLAN_COL, SHAPES, SHAPE_WORD, TOOL_HINT, groundLevel } from './planview.js?v=8126566452';
-import { renderClosures, resultsTitle, setSimMode, updateLabels } from './sim.js?v=8126566452';
+import { $, CAT, GOAL_COL, HEAT, TYPE_COL, UI, busy, busyNote, esc, store, toast } from './common.js?v=07c5c62b44';
+import { api, initBackend, onStatus } from './backend.js?v=07c5c62b44';
+import { wanted } from './local/worldfiles.js?v=07c5c62b44';
+import { S, map, newClosed, plan, view } from './state.js?v=07c5c62b44';
+import { FIX_INFO, OBJ_STYLE, PLAN_COL, SHAPES, SHAPE_WORD, TOOL_HINT, groundLevel } from './planview.js?v=07c5c62b44';
+import { renderClosures, resultsTitle, setSimMode, updateLabels } from './sim.js?v=07c5c62b44';
 
 map.onHover = (s) => { $('#hover').textContent = s; };
 map.onSelect = (sel) => { setSelInputs(sel); };

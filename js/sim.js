@@ -1,9 +1,9 @@
 // Closures, evacuation runs, one-at-a-time test, results, chart and playback.
 import * as THREE from 'three';
-import { $, CLOSED_COL, EXIT_COL, GOAL_COL, UI, b64, busy, busyNote, esc, fmt, store, toast } from './common.js?v=8126566452';
-import { api } from './backend.js?v=8126566452';
-import { S, newClosed, plan, shownClosed, view } from './state.js?v=8126566452';
-import { applyView, kpi, markChip, setCut } from './app.js?v=8126566452';
+import { $, CLOSED_COL, EXIT_COL, GOAL_COL, UI, b64, busy, busyNote, esc, fmt, store, toast } from './common.js?v=07c5c62b44';
+import { api } from './backend.js?v=07c5c62b44';
+import { S, newClosed, plan, shownClosed, view } from './state.js?v=07c5c62b44';
+import { applyView, kpi, markChip, setCut } from './app.js?v=07c5c62b44';
 
 // ------------------------------------------------------------------ modes ---
 // Each mode shows only its own controls (CSS: [data-modes] in #s-sim) and keeps its own last run.
@@ -243,7 +243,8 @@ export function showResults(res) {
     + kpi(stuck, 'no way out', stuck ? 'bad' : '') + kpi(fmt(st.mean_walk_m) + ' m', 'avg. walk to exit');
   $('#agentkey').innerHTML = 'People are coloured by the exit they use; <span class="bad">red</span> = no way out.'
     + (a ? ` <span class="good">Assembly point:</span> ${a.reached} of ${st.people} there, the last after ${fmt(a.total_time_s)} s`
-      + ` (on average ${fmt(a.mean_extra_s)} s walk from the exit)${a.cannot_reach ? `; <span class="bad">${a.cannot_reach} came out where it cannot be reached</span> (grey)` : ''}.` : '');
+      + ` (on average ${fmt(a.mean_extra_s)} s walk from the exit)${a.cannot_reach ? `; <span class="bad">${a.cannot_reach} came out on ground cut off from it</span>`
+        + ' (fenced in, or only joined outside the selected area) and wait as close as they can get (grey)' : ''}.` : '');
   const c = res.compare; const cb = $('#compare');
   if (c) {
     const d = (v) => `<b class="${v > 10 ? 'bad' : v < -10 ? 'good' : ''}">${v > 0 ? '+' : ''}${fmt(v)} s</b>`;

@@ -1,7 +1,7 @@
 // three.js 3D view: blocks, walkable cells, closures, agents, labels, orbit and spectator (fly) camera.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { $, CAT, CLOSED_COL, GOAL_COL, ROLE, TYPE_COL, UI, b64, clamp, heatColor } from './common.js?v=8126566452';
+import { $, CAT, CLOSED_COL, GOAL_COL, ROLE, TYPE_COL, UI, b64, clamp, heatColor } from './common.js?v=07c5c62b44';
 
 // ----------------------------------------------------------------- 3D view ---
 export class View3D {

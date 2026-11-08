@@ -1,8 +1,8 @@
 // Shared app state and the three views (created once, used by app.js and sim.js).
-import { $ } from './common.js?v=8126566452';
-import { MapView } from './mapview.js?v=8126566452';
-import { View3D } from './view3d.js?v=8126566452';
-import { PlanView } from './planview.js?v=8126566452';
+import { $ } from './common.js?v=07c5c62b44';
+import { MapView } from './mapview.js?v=07c5c62b44';
+import { View3D } from './view3d.js?v=07c5c62b44';
+import { PlanView } from './planview.js?v=07c5c62b44';
 
 // -------------------------------------------------------------------- app ---
 export const newClosed = () => ({ exit: new Set(), door: new Set(), stairs: new Set() });
